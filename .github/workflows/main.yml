@@ -116,37 +116,32 @@ jobs:
           yc config set folder-id "$YC_FOLDER_ID"
           yc container registry configure-docker
 
-      - name: 🐳 Build and Push Docker Image
-        env:
-          YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
+      - name: 🛠 Create container (if not exists)
         run: |
-          docker build -t cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest .
-          docker push cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest
-          
-      - name: 🛠 Create container if not exists
-        run: |
-          yc serverless container get --name mlops-ci-cd || \
-          yc serverless container create --name mlops-ci-cd
+          yc serverless container get --name mlops-ci-cd || yc serverless container create --name mlops-ci-cd
 
-      - name: 🐳 Pull and tag image
+      - name: 📥 Pull image from GHCR
         run: |
-          docker pull ${{ env.DOCKER_IMAGE }}
-          docker tag ${{ env.DOCKER_IMAGE }} cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
+          docker pull ghcr.io/lyalkid/mlops-ci-cd:latest
 
-      - name: 📤 Push to Yandex Container Registry
+      - name: 🔖 Tag image for Yandex CR
+        run: |
+          docker tag ghcr.io/lyalkid/mlops-ci-cd:latest cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
+
+      - name: 📤 Push image to Yandex CR
         run: |
           docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
 
-      - name: 🚀 Deploy to Yandex Cloud
+      - name: 🚀 Deploy container revision
         run: |
           yc serverless container revision deploy \
             --container-name mlops-ci-cd \
             --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest \
             --cores 1 \
-            --memory 1GB \
             --concurrency 4 \
             --execution-timeout 30s \
-            --service-account-id ${{ secrets.YC_SA_ID }}
+            --service-account-id "${{ secrets.YC_SA_ID }}"
 
-      - name: 🌍 Make public
-        run: yc serverless container allow-unauthenticated-invoke mlops-ci-cd
+      - name: 🌍 Make container public (first time only)
+        run: |
+          yc serverless container allow-unauthenticated-invoke mlops-ci-cd || true
