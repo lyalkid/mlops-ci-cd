@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
@@ -6,133 +6,111 @@ on:
   pull_request:
     branches: [ master ]
 
-permissions:
-  contents: read
-  packages: write
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  MODEL_PATH: src/models/model.joblib
+  DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/mlops-ci-cd
 
 jobs:
-  build:
+  test-and-build:
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}
     steps:
-      - name: 🔄 Checkout репозитория
-        uses: actions/checkout@v3
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
 
-      - name: 🐍 Установка Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: 📦 Установка зависимостей
+      - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest flake8
 
-      - name: 🧹 Проверка кода (flake8)
+      - name: 🧹 Lint with flake8
+        run: flake8 src tests
+
+      - name: 🧪 Run tests
+        run: pytest -v tests/
+
+      - name: 🤖 Train model
         run: |
-          pip install flake8
-          flake8 src tests
+          mkdir -p src/models
+          python src/train.py
 
-      - name: 🧪 Запуск тестов (pytest)
-        run: |
-          pip install pytest
-          pytest -s tests
-
-      - name: 🤖 Обучение модели (src/train.py)
-        run: python src/train.py
-
-      - name: 📦 Загрузка модели как артефакта
+      - name: 📦 Upload model artifact
         uses: actions/upload-artifact@v4
         with:
           name: model
-          path: models/model.joblib
+          path: ${{ env.MODEL_PATH }}
 
-      - name: 🔮 Инференс модели (src/inference.py)
-        run: python src/inference.py
-
-      - name: 📦 Загрузка артефактов инференса
-        uses: actions/upload-artifact@v4
-        with:
-          name: inference-results
-          path: |
-            predictions.csv
-            report.html
-
-  publish:
-    name: Build & Push Docker image to GHCR
+  deploy-to-yc:
+    needs: test-and-build
     runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: 🔄 Checkout репозитория
-        uses: actions/checkout@v3
+      - name: 🔄 Checkout code
+        uses: actions/checkout@v4
 
-      - name: 📥 Download model artifact
+      - name: 📥 Download model
         uses: actions/download-artifact@v4
         with:
           name: model
-          path: models
+          path: src/models
 
-      - name: 🔐 Логин в GitHub Container Registry
-        uses: docker/login-action@v2
+      - name: 🐳 Build Docker image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE }} .
+
+      - name: 🔐 Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🏗️ Сборка и публикация Docker-образа
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/lyalkid/mlops-ci-cd:latest
+      - name: 🚀 Push to GHCR
+        run: docker push ${{ env.DOCKER_IMAGE }}
 
-  # deploy:
-  #   name: Deploy to Yandex Cloud
-  #   runs-on: ubuntu-latest
-  #   needs: publish
-  #   steps:
-  #     - name: ⬇️ Install YC CLI
-  #       run: |
-  #         curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
-  #         echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
-  #         export PATH="$HOME/yandex-cloud/bin:$PATH"
-  #         yc --version
+      - name: ⬇️ Install YC CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+          yc --version
 
-  #     - name: 🔐 Configure YC CLI
-  #       run: |
-  #         echo "${{ secrets.YC_SA_KEY_BASE64 }}" | base64 --decode > sa-key.json
-  #         yc config set service-account-key sa-key.json
-  #         yc config set cloud-id "${{ secrets.YC_CLOUD_ID }}"
-  #         yc config set folder-id "${{ secrets.YC_FOLDER_ID }}"
-  #         yc container registry configure-docker
+      - name: 🔑 Configure YC CLI
+        run: |
+          echo "${{ secrets.YC_SA_KEY }}" > sa-key.json
+          yc config set service-account-key sa-key.json
+          yc config set cloud-id ${{ secrets.YC_CLOUD_ID }}
+          yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+          yc container registry configure-docker
 
-  #     - name: 🛠 Create container (if not exists)
-  #       run: |
-  #         yc serverless container get --name ml-api || yc serverless container create --name ml-api
+      - name: 🛠 Create container if not exists
+        run: |
+          yc serverless container get --name mlops-ci-cd || \
+          yc serverless container create --name mlops-ci-cd
 
-  #     - name: 📥 Pull image from GHCR
-  #       run: |
-  #         docker pull ghcr.io/<your-username>/<your-repo>:latest
+      - name: 🐳 Pull and tag image
+        run: |
+          docker pull ${{ env.DOCKER_IMAGE }}
+          docker tag ${{ env.DOCKER_IMAGE }} cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
 
-  #     - name: 🔖 Tag image for Yandex CR
-  #       run: |
-  #         docker tag ghcr.io/<your-username>/<your-repo>:latest cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
+      - name: 📤 Push to Yandex Container Registry
+        run: |
+          docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
 
-  #     - name: 📤 Push image to Yandex CR
-  #       run: |
-  #         docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
+      - name: 🚀 Deploy to Yandex Cloud
+        run: |
+          yc serverless container revision deploy \
+            --container-name mlops-ci-cd \
+            --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest \
+            --cores 1 \
+            --memory 1GB \
+            --concurrency 4 \
+            --execution-timeout 30s \
+            --service-account-id ${{ secrets.YC_SA_ID }}
 
-  #     - name: 🚀 Deploy container revision
-  #       run: |
-  #         yc serverless container revision deploy \
-  #           --container-name ml-api \
-  #           --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest \
-  #           --cores 1 \
-  #           --concurrency 4 \
-  #           --execution-timeout 30s \
-  #           --service-account-id "${{ secrets.YC_SA_ID }}"
-
-  #     - name: 🌍 Make container public (optional)
-  #       run: |
-  #         yc serverless container allow-unauthenticated-invoke ml-api || true
+      - name: 🌍 Make public
+        run: yc serverless container allow-unauthenticated-invoke mlops-ci-cd
