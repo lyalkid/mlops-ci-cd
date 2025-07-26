@@ -88,9 +88,9 @@ jobs:
       - name: 🚀 Push to GHCR
         run: docker push ${{ env.DOCKER_IMAGE }}
 
-  deploy-to-yc:
-    needs: build-and-test
-    runs-on: ubuntu-latest
+  # deploy-to-yc:
+  #   needs: build-and-test
+  #   runs-on: ubuntu-latest
     
   #     - name: ⬇️ Install YC CLI
   #       run: |
