@@ -1,0 +1,18 @@
+fastapi
+uvicorn
+pydantic
+pandas
+scikit-learn
+joblib
+ucimlrepo 
+# для предобработки данных
+numpy
+
+# для тестирования
+pytest
+flake8
+
+# если используешь requests для загрузки данных — добавь
+requests
+httpx
+autopep8

@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: 🔄 Checkout репозитория
+        uses: actions/checkout@v3
+
+      - name: 🐍 Установка Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 📦 Установка зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🧹 Проверка кода (flake8)
+        run: |
+          pip install flake8
+          flake8 src tests
+
+      - name: 🧪 Запуск тестов (pytest)
+        run: |
+          pip install pytest
+          pytest -s tests
+
+      - name: 🤖 Обучение модели (src/train.py)
+        run: python src/train.py
+
+      - name: 📦 Загрузка модели как артефакта
+        uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: models/model.joblib
+
+      - name: 🔮 Инференс модели (src/inference.py)
+        run: python src/inference.py
+
+      - name: 📦 Загрузка артефактов инференса
+        uses: actions/upload-artifact@v4
+        with:
+          name: inference-results
+          path: |
+            predictions.csv
+            report.html
+
+  publish:
+    name: Build & Push Docker image to GHCR
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: 🔄 Checkout репозитория
+        uses: actions/checkout@v3
+
+      - name: 📥 Download model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: models
+
+      - name: 🔐 Логин в GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏗️ Сборка и публикация Docker-образа
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/lyalkid/mlops-ci-cd:latest
+
+  # deploy:
+  #   name: Deploy to Yandex Cloud
+  #   runs-on: ubuntu-latest
+  #   needs: publish
+  #   steps:
+  #     - name: ⬇️ Install YC CLI
+  #       run: |
+  #         curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+  #         echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+  #         export PATH="$HOME/yandex-cloud/bin:$PATH"
+  #         yc --version
+
+  #     - name: 🔐 Configure YC CLI
+  #       run: |
+  #         echo "${{ secrets.YC_SA_KEY_BASE64 }}" | base64 --decode > sa-key.json
+  #         yc config set service-account-key sa-key.json
+  #         yc config set cloud-id "${{ secrets.YC_CLOUD_ID }}"
+  #         yc config set folder-id "${{ secrets.YC_FOLDER_ID }}"
+  #         yc container registry configure-docker
+
+  #     - name: 🛠 Create container (if not exists)
+  #       run: |
+  #         yc serverless container get --name ml-api || yc serverless container create --name ml-api
+
+  #     - name: 📥 Pull image from GHCR
+  #       run: |
+  #         docker pull ghcr.io/<your-username>/<your-repo>:latest
+
+  #     - name: 🔖 Tag image for Yandex CR
+  #       run: |
+  #         docker tag ghcr.io/<your-username>/<your-repo>:latest cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
+
+  #     - name: 📤 Push image to Yandex CR
+  #       run: |
+  #         docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
+
+  #     - name: 🚀 Deploy container revision
+  #       run: |
+  #         yc serverless container revision deploy \
+  #           --container-name ml-api \
+  #           --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest \
+  #           --cores 1 \
+  #           --concurrency 4 \
+  #           --execution-timeout 30s \
+  #           --service-account-id "${{ secrets.YC_SA_ID }}"
+
+  #     - name: 🌍 Make container public (optional)
+  #       run: |
+  #         yc serverless container allow-unauthenticated-invoke ml-api || true
