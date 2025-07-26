@@ -85,8 +85,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🚀 Push to GHCR
-        run: docker push ${{ env.DOCKER_IMAGE }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/lyalkid/mlops-ci-cd:latest
 
   # deploy-to-yc:
   #   needs: build-and-test
