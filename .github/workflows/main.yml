@@ -9,14 +9,11 @@ on:
 env:
   PYTHONPATH: ${{ github.workspace }}
   MODEL_PATH: src/models/model.joblib
-  DOCKER_IMAGE: ghcr.io/${{ github.repository_owner }}/mlops-ci-cd
+  DOCKER_IMAGE: ghcr.io/lyalkid/mlops-ci-cd
 
 jobs:
-  test-and-build:
+  build-and-test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - name: 🔄 Checkout code
         uses: actions/checkout@v4
@@ -49,12 +46,20 @@ jobs:
           name: model
           path: ${{ env.MODEL_PATH }}
 
+      - name: 🔮 Run inference
+        run: python src/inference.py
+
+      - name: 📦 Upload inference results
+        uses: actions/upload-artifact@v4
+        with:
+          name: inference-results
+          path: |
+            predictions.csv
+            report.html
+
   deploy-to-yc:
-    needs: test-and-build
+    needs: build-and-test
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
       - name: 🔄 Checkout code
         uses: actions/checkout@v4
@@ -66,8 +71,7 @@ jobs:
           path: src/models
 
       - name: 🐳 Build Docker image
-        run: |
-          docker build -t ${{ env.DOCKER_IMAGE }} .
+        run: docker build -t ${{ env.DOCKER_IMAGE }} .
 
       - name: 🔐 Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -95,23 +99,23 @@ jobs:
 
       - name: 🛠 Create container if not exists
         run: |
-          yc serverless container get --name mlops-ci-cd || \
-          yc serverless container create --name mlops-ci-cd
+          yc serverless container get --name ml-api || \
+          yc serverless container create --name ml-api
 
       - name: 🐳 Pull and tag image
         run: |
           docker pull ${{ env.DOCKER_IMAGE }}
-          docker tag ${{ env.DOCKER_IMAGE }} cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
+          docker tag ${{ env.DOCKER_IMAGE }} cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
 
       - name: 📤 Push to Yandex Container Registry
         run: |
-          docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest
+          docker push cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest
 
       - name: 🚀 Deploy to Yandex Cloud
         run: |
           yc serverless container revision deploy \
-            --container-name mlops-ci-cd \
-            --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/mlops-ci-cd:latest \
+            --container-name ml-api \
+            --image cr.yandex/${{ secrets.YC_REGISTRY_ID }}/ml-api:latest \
             --cores 1 \
             --memory 1GB \
             --concurrency 4 \
@@ -119,4 +123,4 @@ jobs:
             --service-account-id ${{ secrets.YC_SA_ID }}
 
       - name: 🌍 Make public
-        run: yc serverless container allow-unauthenticated-invoke mlops-ci-cd
+        run: yc serverless container allow-unauthenticated-invoke ml-api
