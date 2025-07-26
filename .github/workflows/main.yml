@@ -16,7 +16,7 @@ env:
   DOCKER_IMAGE: ghcr.io/lyalkid/mlops-ci-cd
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: 🔄 Checkout code
@@ -32,13 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest flake8
-
-      - name: 🧹 Lint with flake8
-        run: flake8 src tests
-
-      - name: 🧪 Run tests
-        run: pytest -v tests/
-
+          
       - name: 🤖 Train model
         run: |
           mkdir -p src/models
@@ -60,11 +54,21 @@ jobs:
           path: |
             predictions.csv
             report.html
+  test:
+    name: Testing code
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: 🧹 Lint with flake8
+        run: flake8 src tests
+
+      - name: 🧪 Run tests
+        run: pytest -v tests/
 
   publish:
-    name: Build & Push Docker image to GHCR
+    name: Build & Push Docker image to YCR
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: [build, test]  # Исправлено (было build-and-test)
     steps:
       - name: 🔄 Checkout code
         uses: actions/checkout@v4
@@ -76,17 +80,17 @@ jobs:
           path: src/models
 
       - name: 🐳 Build Docker image
-        run: docker build -t ${{ env.DOCKER_IMAGE }} .
+        run: docker build -t cr.yandex/<registry-id>/mlops-ci-cd:latest .
 
-      - name: 🔐 Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔐 Login to Yandex Container Registry
+        run: |
+          echo "${{ secrets.YC_DOCKER_PASSWORD }}" | docker login \
+            --username json_key \
+            --password-stdin \
+            cr.yandex
 
-      - name: 🚀 Push to GHCR
-        run: docker push ${{ env.DOCKER_IMAGE }}
+      - name: 🚀 Push to YCR
+        run: docker push cr.yandex/<registry-id>/mlops-ci-cd:latest
 
   # deploy-to-yc:
   #   needs: build-and-test
