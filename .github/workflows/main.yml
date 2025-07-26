@@ -96,31 +96,31 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
-    - name: ⬇️ Install YC CLI
-      run: |
-        curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
-        echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
-        yc --version
+      - name: ⬇️ Install YC CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+          yc --version
 
-    - name: 🔑 Configure YC CLI
-      env:
-        YC_SA_KEY: ${{ secrets.YC_SA_KEY }}
-        YC_CLOUD_ID: ${{ secrets.YC_CLOUD_ID }}
-        YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
-      run: |
-        echo "$YC_SA_KEY" > sa-key.json
-        yc config set service-account-key sa-key.json
-        yc config set cloud-id "$YC_CLOUD_ID"
-        yc config set folder-id "$YC_FOLDER_ID"
-        yc container registry configure-docker
+      - name: 🔑 Configure YC CLI
+        env:
+          YC_SA_KEY: ${{ secrets.YC_SA_KEY }}
+          YC_CLOUD_ID: ${{ secrets.YC_CLOUD_ID }}
+          YC_FOLDER_ID: ${{ secrets.YC_FOLDER_ID }}
+        run: |
+          echo "$YC_SA_KEY" > sa-key.json
+          yc config set service-account-key sa-key.json
+          yc config set cloud-id "$YC_CLOUD_ID"
+          yc config set folder-id "$YC_FOLDER_ID"
+          yc container registry configure-docker
 
-    - name: 🐳 Build and Push Docker Image
-      env:
-        YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
-      run: |
-        docker build -t cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest .
-        docker push cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest
-
+      - name: 🐳 Build and Push Docker Image
+        env:
+          YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
+        run: |
+          docker build -t cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest .
+          docker push cr.yandex/$YC_REGISTRY_ID/mlops-ci-cd:latest
+          
       - name: 🛠 Create container if not exists
         run: |
           yc serverless container get --name mlops-ci-cd || \
